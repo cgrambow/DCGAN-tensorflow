@@ -3,7 +3,7 @@ import scipy.misc
 import numpy as np
 
 from model import DCGAN
-from utils import pp, visualize, to_json, show_all_variables
+from utils import pp, sample, visualize, to_json, show_all_variables
 
 import tensorflow as tf
 
@@ -27,6 +27,7 @@ flags.DEFINE_boolean("train", False, "True for training, False for testing [Fals
 flags.DEFINE_boolean("crop", False, "True for training, False for testing [False]")
 flags.DEFINE_boolean("visualize", False, "True for visualizing, False for nothing [False]")
 flags.DEFINE_integer("generate_test_images", 100, "Number of images to generate during test. [100]")
+flags.DEFINE_integer("test", 0, "Generate and save number of images given by 'test'. [0]")
 FLAGS = flags.FLAGS
 
 def main(_):
@@ -98,9 +99,12 @@ def main(_):
     #                 [dcgan.h3_w, dcgan.h3_b, dcgan.g_bn3],
     #                 [dcgan.h4_w, dcgan.h4_b, None])
 
-    # Below is codes for visualization
-    OPTION = 1
-    visualize(sess, dcgan, FLAGS, OPTION)
+    if FLAGS.test > 0:
+        sample(sess, dcgan, FLAGS)
+    else:
+        # Below is codes for visualization
+        OPTION = 1
+        visualize(sess, dcgan, FLAGS, OPTION)
 
 if __name__ == '__main__':
   tf.app.run()

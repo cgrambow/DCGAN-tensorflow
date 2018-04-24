@@ -89,6 +89,20 @@ def transform(image, input_height, input_width,
 def inverse_transform(images):
   return (images+1.)/2.
 
+def sample(sess, dcgan, config):
+  num = config.test
+
+  all_samples = []
+  for _ in xrange(int(math.ceil(float(num)/config.batch_size))):
+    z_sample = np.random.uniform(-1, 1, size=(config.batch_size, dcgan.z_dim))
+    samples = sess.run(dcgan.sampler, feed_dict={dcgan.z: z_sample})
+    all_samples.append(samples)
+
+  images = (np.concatenate(all_samples)[:num]+1.0)/2.0
+  for idx, img in enumerate(images):
+    path = './samples/test_single_{}.png'.format(idx)
+    scipy.misc.imsave(path, img)
+
 def to_json(output_path, *layers):
   with open(output_path, "w") as layer_f:
     lines = ""
