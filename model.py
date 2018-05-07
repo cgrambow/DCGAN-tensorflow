@@ -16,7 +16,7 @@ def conv_out_size_same(size, stride):
 class DCGAN(object):
   def __init__(self, sess, input_height=108, input_width=108, crop=True,
          batch_size=64, sample_num = 64, output_height=64, output_width=64,
-         y_dim=None, z_dim=100, gf_dim=64, df_dim=64,
+         y_dim=None, z_dim=100, gf_dim=64, df_dim=64, dfz_dim=256, dfxz_dim=1024, ef_dim=64,
          gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
          input_fname_pattern='*.jpg', checkpoint_dir=None, sample_dir=None, data_dir='./data'):
     """
@@ -25,9 +25,12 @@ class DCGAN(object):
       sess: TensorFlow session
       batch_size: The size of batch. Should be specified before training.
       y_dim: (optional) Dimension of dim for y. [None]
-      z_dim: (optional) Dimension of dim for Z. [100]
+      z_dim: (optional) Dimension of dim for Z (also encoder dimension). [100]
       gf_dim: (optional) Dimension of gen filters in first conv layer. [64]
       df_dim: (optional) Dimension of discrim filters in first conv layer. [64]
+      dfz_dim: (optional) Number of units for z discriminator. [256]
+      dfxz_dim: (optional) Number of units for combined discriminator. [1024]
+      ef_dim: (optional) Dimension of encoder filters in first conv layer. [64]
       gfc_dim: (optional) Dimension of gen units for for fully connected layer. [1024]
       dfc_dim: (optional) Dimension of discrim units for fully connected layer. [1024]
       c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]
@@ -48,6 +51,9 @@ class DCGAN(object):
 
     self.gf_dim = gf_dim
     self.df_dim = df_dim
+    self.dfz_dim = dfz_dim
+    self.dfxz_dim = dfxz_dim
+    self.ef_dim = ef_dim
 
     self.gfc_dim = gfc_dim
     self.dfc_dim = dfc_dim
@@ -65,6 +71,11 @@ class DCGAN(object):
 
     if not self.y_dim:
       self.g_bn3 = batch_norm(name='g_bn3')
+
+    self.e_bn0 = batch_norm(name='e_bn0')
+    self.e_bn1 = batch_norm(name='e_bn1')
+    self.e_bn2 = batch_norm(name='e_bn2')
+    self.e_bn3 = batch_norm(name='e_bn3')
 
     self.dataset_name = dataset_name
     self.input_fname_pattern = input_fname_pattern
@@ -107,10 +118,12 @@ class DCGAN(object):
     self.z_sum = histogram_summary("z", self.z)
 
     self.G                  = self.generator(self.z, self.y)
-    self.D, self.D_logits   = self.discriminator(inputs, self.y, reuse=False)
+    self.E                  = self.encoder(inputs)
+    self.D, self.D_logits   = self.discriminator(inputs, self.E, self.y, reuse=False)
     self.sampler            = self.sampler(self.z, self.y)
-    self.D_, self.D_logits_ = self.discriminator(self.G, self.y, reuse=True)
-    
+    self.E_                 = self.encoder(self.G)
+    self.D_, self.D_logits_ = self.discriminator(self.G, self.E_, self.y, reuse=True)
+
     self.d_sum = histogram_summary("d", self.D)
     self.d__sum = histogram_summary("d_", self.D_)
     self.G_sum = image_summary("G", self.G)
@@ -309,19 +322,32 @@ class DCGAN(object):
         if np.mod(counter, 500) == 2:
           self.save(config.checkpoint_dir, counter)
 
-  def discriminator(self, image, y=None, reuse=False):
+  def discriminator(self, image, z_, y=None, reuse=False):
+    # z_ is encoder output
     with tf.variable_scope("discriminator") as scope:
       if reuse:
         scope.reuse_variables()
 
       if not self.y_dim:
+        # Image discriminator
         h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
         h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
         h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim*4, name='d_h2_conv')))
         h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim*8, name='d_h3_conv')))
-        h4 = linear(tf.reshape(h3, [self.batch_size, -1]), 1, 'd_h4_lin')
+        # Same size as latent discrim output:
+        h4 = lrelu(linear(tf.reshape(h3, [self.batch_size, -1]), self.dfz_dim, 'd_h4_lin'))
 
-        return tf.nn.sigmoid(h4), h4
+        # Latent discriminator
+        h0_ = tf.nn.dropout(lrelu(linear(z_, self.dfz_dim, 'd_h0__lin')), 0.2)
+        h1_ = tf.nn.dropout(lrelu(linear(h0_, self.dfz_dim, 'd_h1__lin')), 0.2)
+
+        # Combined discriminator
+        xz_ = tf.concat_v2([h4, h1_], 1)
+        h5 = tf.nn.dropout(lrelu(linear(xz_, self.dfxz_dim, 'd_h5_lin')), 0.2)
+        h6 = tf.nn.dropout(lrelu(linear(h5, self.dfxz_dim, 'd_h6_lin')), 0.2)
+        h7 = linear(h6, 1, 'd_h7_lin')
+
+        return tf.nn.sigmoid(h7), h7
       else:
         yb = tf.reshape(y, [self.batch_size, 1, 1, self.y_dim])
         x = conv_cond_concat(image, yb)
@@ -398,6 +424,32 @@ class DCGAN(object):
 
         return tf.nn.sigmoid(
             deconv2d(h2, [self.batch_size, s_h, s_w, self.c_dim], name='g_h3'))
+
+  def encoder(self, image):
+    with tf.variable_scope('encoder') as scope:
+      scope.reuse_variables()
+
+      s_h, s_w = self.output_height, self.output_width
+      s_h2, s_w2 = conv_out_size_same(s_h, 2), conv_out_size_same(s_w, 2)
+      s_h4, s_w4 = conv_out_size_same(s_h2, 2), conv_out_size_same(s_w2, 2)
+      s_h8, s_w8 = conv_out_size_same(s_h4, 2), conv_out_size_same(s_w4, 2)
+      s_h16, s_w16 = conv_out_size_same(s_h8, 2), conv_out_size_same(s_w8, 2)
+
+      h0 = conv2d(image, self.ef_dim, name='e_h0')
+      h0 = tf.nn.tanh(self.e_bn0(h0, train=False))
+
+      h1 = conv2d(h0, self.ef_dim*2, name='e_h1')
+      h1 = tf.nn.relu(self.e_bn1(h1, train=False))
+
+      h2 = conv2d(h1, self.ef_dim*4, name='e_h2')
+      h2 = tf.nn.relu(self.e_bn2(h2, train=False))
+
+      h3 = conv2d(h2, self.ef_dim*8, name='e_h3')
+      h3 = tf.nn.relu(self.e_bn3(h3, train=False))
+
+      h4 = linear(tf.reshape(h3, [-1, self.ef_dim*8*s_h16*s_w16]), self.z_dim, 'e_h4_lin')
+
+      return tf.nn.tanh(h4)
 
   def sampler(self, z, y=None):
     with tf.variable_scope("generator") as scope:
