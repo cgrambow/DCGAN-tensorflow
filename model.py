@@ -18,7 +18,8 @@ class DCGAN(object):
          batch_size=64, sample_num = 64, output_height=64, output_width=64,
          y_dim=None, z_dim=100, gf_dim=64, df_dim=64, dfz_dim=256, dfxz_dim=1024, ef_dim=64,
          gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
-         input_fname_pattern='*.jpg', checkpoint_dir=None, sample_dir=None, data_dir='./data'):
+         input_fname_pattern='*.jpg', checkpoint_dir=None, encoder_dir='dcae_checkpoint',
+         sample_dir=None, data_dir='./data'):
     """
 
     Args:
@@ -80,6 +81,7 @@ class DCGAN(object):
     self.dataset_name = dataset_name
     self.input_fname_pattern = input_fname_pattern
     self.checkpoint_dir = checkpoint_dir
+    self.encoder_dir = encoder_dir
     self.data_dir = data_dir
 
     if self.dataset_name == 'mnist':
@@ -118,15 +120,17 @@ class DCGAN(object):
     self.z_sum = histogram_summary("z", self.z)
 
     self.G                  = self.generator(self.z, self.y)
-    self.E                  = self.encoder(inputs)
+    self.E                  = self.encoder(inputs, reuse=False)
     self.D, self.D_logits   = self.discriminator(inputs, self.E, self.y, reuse=False)
     self.sampler            = self.sampler(self.z, self.y)
-    self.E_                 = self.encoder(self.G)
+    self.E_                 = self.encoder(self.G, reuse=True)
     self.D_, self.D_logits_ = self.discriminator(self.G, self.E_, self.y, reuse=True)
 
     self.d_sum = histogram_summary("d", self.D)
     self.d__sum = histogram_summary("d_", self.D_)
     self.G_sum = image_summary("G", self.G)
+    self.e_sum = histogram_summary("e", self.E)
+    self.e__sum = histogram_summary("e_", self.E_)
 
     def sigmoid_cross_entropy_with_logits(x, y):
       try:
@@ -153,8 +157,10 @@ class DCGAN(object):
 
     self.d_vars = [var for var in t_vars if 'd_' in var.name]
     self.g_vars = [var for var in t_vars if 'g_' in var.name]
+    self.e_vars = [var for var in t_vars if 'e_' in var.name]  # These won't actually be trained
 
-    self.saver = tf.train.Saver()
+    self.saver = tf.train.Saver(self.d_vars+self.g_vars)
+    self.encoder_loader = tf.train.Saver(self.e_vars)
 
   def train(self, config):
     d_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
@@ -194,7 +200,7 @@ class DCGAN(object):
   
     counter = 1
     start_time = time.time()
-    could_load, checkpoint_counter = self.load(self.checkpoint_dir)
+    could_load, checkpoint_counter = self.load(self.checkpoint_dir, self.encoder_dir)
     if could_load:
       counter = checkpoint_counter
       print(" [*] Load SUCCESS")
@@ -207,7 +213,7 @@ class DCGAN(object):
       else:      
         self.data = glob(os.path.join(
           config.data_dir, config.dataset, self.input_fname_pattern))
-        batch_idxs = min(len(self.data), config.train_size) // config.batch_size
+        batch_idxs = int(min(len(self.data), config.train_size) // config.batch_size)
 
       for idx in xrange(0, batch_idxs):
         if config.dataset == 'mnist':
@@ -288,7 +294,7 @@ class DCGAN(object):
 
         counter += 1
         print("Epoch: [%2d/%2d] [%4d/%4d] time: %4.4f, d_loss: %.8f, g_loss: %.8f" \
-          % (epoch, config.epoch, idx, batch_idxs,
+          % (epoch+1, config.epoch, idx+1, batch_idxs,
             time.time() - start_time, errD_fake+errD_real, errG))
 
         if np.mod(counter, 100) == 1:
@@ -425,9 +431,10 @@ class DCGAN(object):
         return tf.nn.sigmoid(
             deconv2d(h2, [self.batch_size, s_h, s_w, self.c_dim], name='g_h3'))
 
-  def encoder(self, image):
-    with tf.variable_scope('encoder') as scope:
-      scope.reuse_variables()
+  def encoder(self, image, reuse=False):
+    with tf.variable_scope("encoder") as scope:
+      if reuse:
+        scope.reuse_variables()
 
       s_h, s_w = self.output_height, self.output_width
       s_h2, s_w2 = conv_out_size_same(s_h, 2), conv_out_size_same(s_w, 2)
@@ -545,6 +552,10 @@ class DCGAN(object):
     return "{}_{}_{}_{}".format(
         self.dataset_name, self.batch_size,
         self.output_height, self.output_width)
+
+  @property
+  def encoder_model_dir(self):
+    return "{}_{}_{}".format(self.dataset_name, self.output_height, self.output_width)
       
   def save(self, checkpoint_dir, step):
     model_name = "DCGAN.model"
@@ -557,10 +568,22 @@ class DCGAN(object):
             os.path.join(checkpoint_dir, model_name),
             global_step=step)
 
-  def load(self, checkpoint_dir):
+  def load(self, checkpoint_dir, encoder_dir):
+    encoder_dir = os.path.join(encoder_dir, self.encoder_model_dir)
+    if not os.path.exists(encoder_dir):
+      raise Exception('Encoder weights could not be found in {}'.format(encoder_dir))
+
     import re
     print(" [*] Reading checkpoints...")
     checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir)
+
+    ckpt_encoder = tf.train.get_checkpoint_state(encoder_dir)
+    if ckpt_encoder.model_checkpoint_path:
+      ckpt_encoder_name = os.path.basename(ckpt_encoder.model_checkpoint_path)
+      self.encoder_loader.restore(self.sess, os.path.join(encoder_dir, ckpt_encoder_name))
+      print(" [*] Loaded encoder weights from {}".format(ckpt_encoder_name))
+    else:
+      raise Exception('Could not load encoder weights')
 
     ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
     if ckpt and ckpt.model_checkpoint_path:

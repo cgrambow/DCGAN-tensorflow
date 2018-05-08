@@ -21,6 +21,7 @@ flags.DEFINE_integer("discriminator_dim", 64, "The dimension of the discriminato
 flags.DEFINE_string("dataset", "celebA", "The name of dataset [celebA, mnist, lsun]")
 flags.DEFINE_string("input_fname_pattern", "*.jpg", "Glob pattern of filename of input images [*]")
 flags.DEFINE_string("checkpoint_dir", "checkpoint", "Directory name to save the checkpoints [checkpoint]")
+flags.DEFINE_string("encoder_dir", "dcae_checkpoint", "Directory name to load encoder weights from [dcae_checkpoint]")
 flags.DEFINE_string("data_dir", "./data", "Root directory of dataset [data]")
 flags.DEFINE_string("sample_dir", "samples", "Directory name to save the image samples [samples]")
 flags.DEFINE_boolean("train", False, "True for training, False for testing [False]")
@@ -80,6 +81,7 @@ def main(_):
           input_fname_pattern=FLAGS.input_fname_pattern,
           crop=FLAGS.crop,
           checkpoint_dir=FLAGS.checkpoint_dir,
+          encoder_dir=FLAGS.encoder_dir,
           sample_dir=FLAGS.sample_dir,
           data_dir=FLAGS.data_dir,
           df_dim=FLAGS.discriminator_dim)
@@ -89,7 +91,7 @@ def main(_):
     if FLAGS.train:
       dcgan.train(FLAGS)
     else:
-      if not dcgan.load(FLAGS.checkpoint_dir)[0]:
+      if not dcgan.load(FLAGS.checkpoint_dir, FLAGS.encoder_dir)[0]:
         raise Exception("[!] Train a model first, then run test mode")
       
 
