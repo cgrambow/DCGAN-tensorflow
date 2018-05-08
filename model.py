@@ -16,7 +16,7 @@ def conv_out_size_same(size, stride):
 class DCGAN(object):
   def __init__(self, sess, input_height=108, input_width=108, crop=True,
          batch_size=64, sample_num = 64, output_height=64, output_width=64,
-         y_dim=None, z_dim=100, gf_dim=64, df_dim=64, dfz_dim=256, dfxz_dim=1024, ef_dim=64,
+         y_dim=None, z_dim=100, ez_dim=100, gf_dim=64, df_dim=64, dfz_dim=256, dfxz_dim=1024, ef_dim=64,
          gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
          input_fname_pattern='*.jpg', checkpoint_dir=None, encoder_dir='dcae_checkpoint',
          sample_dir=None, data_dir='./data'):
@@ -26,7 +26,8 @@ class DCGAN(object):
       sess: TensorFlow session
       batch_size: The size of batch. Should be specified before training.
       y_dim: (optional) Dimension of dim for y. [None]
-      z_dim: (optional) Dimension of dim for Z (also encoder dimension). [100]
+      z_dim: (optional) Dimension of dim for Z. [100]
+      ez_dim: (optional) Dimension of dim for Z in encoder. [100]
       gf_dim: (optional) Dimension of gen filters in first conv layer. [64]
       df_dim: (optional) Dimension of discrim filters in first conv layer. [64]
       dfz_dim: (optional) Number of units for z discriminator. [256]
@@ -49,6 +50,7 @@ class DCGAN(object):
 
     self.y_dim = y_dim
     self.z_dim = z_dim
+    self.ez_dim = ez_dim
 
     self.gf_dim = gf_dim
     self.df_dim = df_dim
@@ -454,7 +456,7 @@ class DCGAN(object):
       h3 = conv2d(h2, self.ef_dim*8, name='e_h3')
       h3 = tf.nn.relu(self.e_bn3(h3, train=False))
 
-      h4 = linear(tf.reshape(h3, [-1, self.ef_dim*8*s_h16*s_w16]), self.z_dim, 'e_h4_lin')
+      h4 = linear(tf.reshape(h3, [-1, self.ef_dim*8*s_h16*s_w16]), self.ez_dim, 'e_h4_lin')
 
       return tf.nn.tanh(h4)
 
