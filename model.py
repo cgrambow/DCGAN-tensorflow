@@ -19,7 +19,7 @@ class DCGAN(object):
          y_dim=None, z_dim=100, ez_dim=100, gf_dim=64, df_dim=64, dfz_dim=256, dfxz_dim=1024, ef_dim=64,
          gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
          input_fname_pattern='*.jpg', checkpoint_dir=None, encoder_dir='dcae_checkpoint',
-         sample_dir=None, data_dir='./data', use_encoder=False):
+         sample_dir=None, data_dir='./data', use_encoder=False, use_trainable_encoder=False):
     """
 
     Args:
@@ -80,6 +80,11 @@ class DCGAN(object):
     self.e_bn2 = batch_norm(name='e_bn2')
     self.e_bn3 = batch_norm(name='e_bn3')
 
+    self.et_bn0 = batch_norm(name='et_bn0')
+    self.et_bn1 = batch_norm(name='et_bn1')
+    self.et_bn2 = batch_norm(name='et_bn2')
+    self.et_bn3 = batch_norm(name='et_bn3')
+
     self.dataset_name = dataset_name
     self.input_fname_pattern = input_fname_pattern
     self.checkpoint_dir = checkpoint_dir
@@ -100,6 +105,7 @@ class DCGAN(object):
     self.grayscale = (self.c_dim == 1)
 
     self.use_encoder = use_encoder
+    self.use_trainable_encoder = use_trainable_encoder
 
     self.build_model()
 
@@ -123,19 +129,32 @@ class DCGAN(object):
       tf.float32, [None, self.z_dim], name='z')
     self.z_sum = histogram_summary("z", self.z)
 
-    self.G                  = self.generator(self.z, self.y)
+    self.G = self.generator(self.z, self.y)
     self.sampler = self.sampler(self.z, self.y)
 
     if self.use_encoder:
-      self.E                  = self.encoder(inputs, reuse=False)
-      self.D, self.D_logits   = self.discriminator(inputs, z_=self.E, y=self.y, reuse=False)
-      self.E_                 = self.encoder(self.G, reuse=True)
-      self.D_, self.D_logits_ = self.discriminator(self.G, z_=self.E_, y=self.y, reuse=True)
+      self.E = self.encoder(inputs, reuse=False)
+      self.E_ = self.encoder(self.G, reuse=True)
       self.e_sum = histogram_summary("e", self.E)
       self.e__sum = histogram_summary("e_", self.E_)
+
+      if self.use_trainable_encoder:
+        self.ET = self.trainable_encoder(inputs)
+        self.et_sum = histogram_summary("et", self.ET)
+        self.D, self.D_logits = self.discriminator(inputs, z=self.ET, z_=self.E, y=self.y, reuse=False)
+        self.D_, self.D_logits_ = self.discriminator(self.G, z=self.z, z_=self.E_, y=self.y, reuse=True)
+      else:
+        self.D, self.D_logits = self.discriminator(inputs, z_=self.E, y=self.y, reuse=False)
+        self.D_, self.D_logits_ = self.discriminator(self.G, z_=self.E_, y=self.y, reuse=True)
     else:
-      self.D, self.D_logits = self.discriminator(inputs, y=self.y, reuse=False)
-      self.D_, self.D_logits_ = self.discriminator(self.G, y=self.y, reuse=True)
+      if self.use_trainable_encoder:
+        self.ET = self.trainable_encoder(inputs)
+        self.et_sum = histogram_summary("et", self.ET)
+        self.D, self.D_logits = self.discriminator(inputs, z=self.ET, y=self.y, reuse=False)
+        self.D_, self.D_logits_ = self.discriminator(self.G, z=self.z, y=self.y, reuse=True)
+      else:
+        self.D, self.D_logits   = self.discriminator(inputs, y=self.y, reuse=False)
+        self.D_, self.D_logits_ = self.discriminator(self.G, y=self.y, reuse=True)
 
     self.d_sum = histogram_summary("d", self.D)
     self.d__sum = histogram_summary("d_", self.D_)
@@ -166,25 +185,36 @@ class DCGAN(object):
 
     self.d_vars = [var for var in t_vars if 'd_' in var.name]
     self.g_vars = [var for var in t_vars if 'g_' in var.name]
-
-    self.saver = tf.train.Saver(self.d_vars+self.g_vars)
+    if self.use_trainable_encoder:
+      self.et_vars = [var for var in t_vars if 'et_' in var.name]
+      self.saver = tf.train.Saver(self.d_vars+self.g_vars+self.et_vars)
+    else:
+      self.saver = tf.train.Saver(self.d_vars+self.g_vars)
 
     if self.use_encoder:
-      self.e_vars = [var for var in t_vars if 'e_' in var.name]  # These won't actually be trained
+      self.e_vars = [var for var in t_vars if '/e_' in var.name]  # These won't actually be trained
       self.encoder_loader = tf.train.Saver(self.e_vars)
 
   def train(self, config):
     d_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
               .minimize(self.d_loss, var_list=self.d_vars)
-    g_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
-              .minimize(self.g_loss, var_list=self.g_vars)
+    if self.use_trainable_encoder:
+      g_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
+                .minimize(self.g_loss, var_list=self.g_vars+self.et_vars)
+    else:
+      g_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
+                .minimize(self.g_loss, var_list=self.g_vars)
     try:
       tf.global_variables_initializer().run()
     except:
       tf.initialize_all_variables().run()
 
-    self.g_sum = merge_summary([self.z_sum, self.d__sum,
-      self.G_sum, self.d_loss_fake_sum, self.g_loss_sum])
+    if self.use_trainable_encoder:
+      self.g_sum = merge_summary([self.z_sum, self.d__sum,
+        self.G_sum, self.et_sum, self.d_loss_fake_sum, self.g_loss_sum])
+    else:
+      self.g_sum = merge_summary([self.z_sum, self.d__sum,
+        self.G_sum, self.d_loss_fake_sum, self.g_loss_sum])
     self.d_sum = merge_summary(
         [self.z_sum, self.d_sum, self.d_loss_real_sum, self.d_loss_sum])
     self.writer = SummaryWriter("./logs", self.sess.graph)
@@ -291,12 +321,12 @@ class DCGAN(object):
 
           # Update G network
           _, summary_str = self.sess.run([g_optim, self.g_sum],
-            feed_dict={ self.z: batch_z })
+            feed_dict={ self.z: batch_z, self.inputs: batch_images })
           self.writer.add_summary(summary_str, counter)
 
           # Run g_optim twice to make sure that d_loss does not go to zero (different from paper)
           _, summary_str = self.sess.run([g_optim, self.g_sum],
-            feed_dict={ self.z: batch_z })
+            feed_dict={ self.z: batch_z, self.inputs: batch_images })
           self.writer.add_summary(summary_str, counter)
           
           errD_fake = self.d_loss_fake.eval({ self.z: batch_z })
@@ -331,7 +361,7 @@ class DCGAN(object):
                 },
               )
               save_images(samples, image_manifold_size(samples.shape[0]),
-                    './{}/train_{:02d}_{:04d}.png'.format(config.sample_dir, epoch, idx))
+                    './{}/train_{:02d}_{:04d}.png'.format(config.sample_dir, epoch+1, idx+1))
               print("[Sample] d_loss: %.8f, g_loss: %.8f" % (d_loss, g_loss)) 
             except:
               print("one pic error!...")
@@ -341,7 +371,8 @@ class DCGAN(object):
 
     self.save(config.checkpoint_dir, counter)
 
-  def discriminator(self, image, z_=None, y=None, reuse=False):
+  def discriminator(self, image, z=None, z_=None, y=None, reuse=False):
+    # z is latent space or trainable encoder output
     # z_ is static encoder output
     with tf.variable_scope("discriminator") as scope:
       if reuse:
@@ -354,17 +385,29 @@ class DCGAN(object):
         h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim*4, name='d_h2_conv')))
         h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim*8, name='d_h3_conv')))
 
-        if self.use_encoder:
+        if self.use_trainable_encoder or self.use_encoder:
           # Same size as latent discrim output:
           h4 = lrelu(linear(tf.reshape(h3, [self.batch_size, -1]), self.dfz_dim, 'd_h4_lin'))
 
-          # Latent discriminator
-          h0_ = tf.nn.dropout(lrelu(linear(z_, self.dfz_dim, 'd_h0__lin')), 0.2)
-          h1_ = tf.nn.dropout(lrelu(linear(h0_, self.dfz_dim, 'd_h1__lin')), 0.2)
+          if self.use_trainable_encoder and self.use_encoder:
+            # Latent discriminators
+            h0_ = tf.nn.dropout(lrelu(linear(z_, self.dfz_dim, 'd_h0__lin')), 0.2)
+            h1_ = tf.nn.dropout(lrelu(linear(h0_, self.dfz_dim, 'd_h1__lin')), 0.2)
+            h0__ = tf.nn.dropout(lrelu(linear(z, self.dfz_dim, 'd_h0___lin')), 0.2)
+            h1__ = tf.nn.dropout(lrelu(linear(h0__, self.dfz_dim, 'd_h1___lin')), 0.2)
 
-          # Combined discriminator
-          xz_ = tf.concat_v2([h4, h1_], 1)
-          h5 = tf.nn.dropout(lrelu(linear(xz_, self.dfxz_dim, 'd_h5_lin')), 0.2)
+            # Combined discriminator
+            dc = tf.concat_v2([h4, h1_, h1__], 1)
+          elif self.use_trainable_encoder:
+            h0__ = tf.nn.dropout(lrelu(linear(z, self.dfz_dim, 'd_h0___lin')), 0.2)
+            h1__ = tf.nn.dropout(lrelu(linear(h0__, self.dfz_dim, 'd_h1___lin')), 0.2)
+            dc = tf.concat_v2([h4, h1__], 1)
+          elif self.use_encoder:
+            h0_ = tf.nn.dropout(lrelu(linear(z_, self.dfz_dim, 'd_h0__lin')), 0.2)
+            h1_ = tf.nn.dropout(lrelu(linear(h0_, self.dfz_dim, 'd_h1__lin')), 0.2)
+            dc = tf.concat_v2([h4, h1_], 1)
+
+          h5 = tf.nn.dropout(lrelu(linear(dc, self.dfxz_dim, 'd_h5_lin')), 0.2)
           h6 = tf.nn.dropout(lrelu(linear(h5, self.dfxz_dim, 'd_h6_lin')), 0.2)
           h7 = linear(h6, 1, 'd_h7_lin')
 
@@ -473,6 +516,30 @@ class DCGAN(object):
       h3 = tf.nn.relu(self.e_bn3(h3, train=False))
 
       h4 = linear(tf.reshape(h3, [-1, self.ef_dim*8*s_h16*s_w16]), self.ez_dim, 'e_h4_lin')
+
+      return tf.nn.tanh(h4)
+
+  def trainable_encoder(self, image):
+    with tf.variable_scope("trainable_encoder") as scope:
+      s_h, s_w = self.output_height, self.output_width
+      s_h2, s_w2 = conv_out_size_same(s_h, 2), conv_out_size_same(s_w, 2)
+      s_h4, s_w4 = conv_out_size_same(s_h2, 2), conv_out_size_same(s_w2, 2)
+      s_h8, s_w8 = conv_out_size_same(s_h4, 2), conv_out_size_same(s_w4, 2)
+      s_h16, s_w16 = conv_out_size_same(s_h8, 2), conv_out_size_same(s_w8, 2)
+
+      h0 = conv2d(image, self.ef_dim, name='et_h0')
+      h0 = tf.nn.tanh(self.et_bn0(h0))
+
+      h1 = conv2d(h0, self.ef_dim*2, name='et_h1')
+      h1 = tf.nn.relu(self.et_bn1(h1))
+
+      h2 = conv2d(h1, self.ef_dim*4, name='et_h2')
+      h2 = tf.nn.relu(self.et_bn2(h2))
+
+      h3 = conv2d(h2, self.ef_dim*8, name='et_h3')
+      h3 = tf.nn.relu(self.et_bn3(h3))
+
+      h4 = linear(tf.reshape(h3, [-1, self.ef_dim*8*s_h16*s_w16]), self.z_dim, 'et_h4_lin')
 
       return tf.nn.tanh(h4)
 
