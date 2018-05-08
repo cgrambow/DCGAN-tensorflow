@@ -30,6 +30,7 @@ flags.DEFINE_boolean("crop", False, "True for training, False for testing [False
 flags.DEFINE_boolean("visualize", False, "True for visualizing, False for nothing [False]")
 flags.DEFINE_integer("generate_test_images", 100, "Number of images to generate during test. [100]")
 flags.DEFINE_integer("test", 0, "Generate and save number of images given by 'test'. [0]")
+flags.DEFINE_boolean("use_encoder", False, "True to use static encoder. [False]")
 FLAGS = flags.FLAGS
 
 def main(_):
@@ -86,7 +87,8 @@ def main(_):
           encoder_dir=FLAGS.encoder_dir,
           sample_dir=FLAGS.sample_dir,
           data_dir=FLAGS.data_dir,
-          df_dim=FLAGS.discriminator_dim)
+          df_dim=FLAGS.discriminator_dim,
+          use_encoder=FLAGS.use_encoder)
 
     show_all_variables()
 

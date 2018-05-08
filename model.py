@@ -19,7 +19,7 @@ class DCGAN(object):
          y_dim=None, z_dim=100, ez_dim=100, gf_dim=64, df_dim=64, dfz_dim=256, dfxz_dim=1024, ef_dim=64,
          gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
          input_fname_pattern='*.jpg', checkpoint_dir=None, encoder_dir='dcae_checkpoint',
-         sample_dir=None, data_dir='./data'):
+         sample_dir=None, data_dir='./data', use_encoder=False):
     """
 
     Args:
@@ -99,6 +99,8 @@ class DCGAN(object):
 
     self.grayscale = (self.c_dim == 1)
 
+    self.use_encoder = use_encoder
+
     self.build_model()
 
   def build_model(self):
@@ -122,17 +124,22 @@ class DCGAN(object):
     self.z_sum = histogram_summary("z", self.z)
 
     self.G                  = self.generator(self.z, self.y)
-    self.E                  = self.encoder(inputs, reuse=False)
-    self.D, self.D_logits   = self.discriminator(inputs, self.E, self.y, reuse=False)
-    self.sampler            = self.sampler(self.z, self.y)
-    self.E_                 = self.encoder(self.G, reuse=True)
-    self.D_, self.D_logits_ = self.discriminator(self.G, self.E_, self.y, reuse=True)
+    self.sampler = self.sampler(self.z, self.y)
+
+    if self.use_encoder:
+      self.E                  = self.encoder(inputs, reuse=False)
+      self.D, self.D_logits   = self.discriminator(inputs, z_=self.E, y=self.y, reuse=False)
+      self.E_                 = self.encoder(self.G, reuse=True)
+      self.D_, self.D_logits_ = self.discriminator(self.G, z_=self.E_, y=self.y, reuse=True)
+      self.e_sum = histogram_summary("e", self.E)
+      self.e__sum = histogram_summary("e_", self.E_)
+    else:
+      self.D, self.D_logits = self.discriminator(inputs, y=self.y, reuse=False)
+      self.D_, self.D_logits_ = self.discriminator(self.G, y=self.y, reuse=True)
 
     self.d_sum = histogram_summary("d", self.D)
     self.d__sum = histogram_summary("d_", self.D_)
     self.G_sum = image_summary("G", self.G)
-    self.e_sum = histogram_summary("e", self.E)
-    self.e__sum = histogram_summary("e_", self.E_)
 
     def sigmoid_cross_entropy_with_logits(x, y):
       try:
@@ -159,10 +166,12 @@ class DCGAN(object):
 
     self.d_vars = [var for var in t_vars if 'd_' in var.name]
     self.g_vars = [var for var in t_vars if 'g_' in var.name]
-    self.e_vars = [var for var in t_vars if 'e_' in var.name]  # These won't actually be trained
 
     self.saver = tf.train.Saver(self.d_vars+self.g_vars)
-    self.encoder_loader = tf.train.Saver(self.e_vars)
+
+    if self.use_encoder:
+      self.e_vars = [var for var in t_vars if 'e_' in var.name]  # These won't actually be trained
+      self.encoder_loader = tf.train.Saver(self.e_vars)
 
   def train(self, config):
     d_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
@@ -332,8 +341,8 @@ class DCGAN(object):
 
     self.save(config.checkpoint_dir, counter)
 
-  def discriminator(self, image, z_, y=None, reuse=False):
-    # z_ is encoder output
+  def discriminator(self, image, z_=None, y=None, reuse=False):
+    # z_ is static encoder output
     with tf.variable_scope("discriminator") as scope:
       if reuse:
         scope.reuse_variables()
@@ -344,20 +353,25 @@ class DCGAN(object):
         h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
         h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim*4, name='d_h2_conv')))
         h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim*8, name='d_h3_conv')))
-        # Same size as latent discrim output:
-        h4 = lrelu(linear(tf.reshape(h3, [self.batch_size, -1]), self.dfz_dim, 'd_h4_lin'))
 
-        # Latent discriminator
-        h0_ = tf.nn.dropout(lrelu(linear(z_, self.dfz_dim, 'd_h0__lin')), 0.2)
-        h1_ = tf.nn.dropout(lrelu(linear(h0_, self.dfz_dim, 'd_h1__lin')), 0.2)
+        if self.use_encoder:
+          # Same size as latent discrim output:
+          h4 = lrelu(linear(tf.reshape(h3, [self.batch_size, -1]), self.dfz_dim, 'd_h4_lin'))
 
-        # Combined discriminator
-        xz_ = tf.concat_v2([h4, h1_], 1)
-        h5 = tf.nn.dropout(lrelu(linear(xz_, self.dfxz_dim, 'd_h5_lin')), 0.2)
-        h6 = tf.nn.dropout(lrelu(linear(h5, self.dfxz_dim, 'd_h6_lin')), 0.2)
-        h7 = linear(h6, 1, 'd_h7_lin')
+          # Latent discriminator
+          h0_ = tf.nn.dropout(lrelu(linear(z_, self.dfz_dim, 'd_h0__lin')), 0.2)
+          h1_ = tf.nn.dropout(lrelu(linear(h0_, self.dfz_dim, 'd_h1__lin')), 0.2)
 
-        return tf.nn.sigmoid(h7), h7
+          # Combined discriminator
+          xz_ = tf.concat_v2([h4, h1_], 1)
+          h5 = tf.nn.dropout(lrelu(linear(xz_, self.dfxz_dim, 'd_h5_lin')), 0.2)
+          h6 = tf.nn.dropout(lrelu(linear(h5, self.dfxz_dim, 'd_h6_lin')), 0.2)
+          h7 = linear(h6, 1, 'd_h7_lin')
+
+          return tf.nn.sigmoid(h7), h7
+        else:
+          h4 = lrelu(linear(tf.reshape(h3, [self.batch_size, -1]), 1, 'd_h4_lin'))
+          return tf.nn.sigmoid(h4), h4
       else:
         yb = tf.reshape(y, [self.batch_size, 1, 1, self.y_dim])
         x = conv_cond_concat(image, yb)
@@ -573,21 +587,22 @@ class DCGAN(object):
             global_step=step)
 
   def load(self, checkpoint_dir, encoder_dir):
-    encoder_dir = os.path.join(encoder_dir, self.encoder_model_dir)
-    if not os.path.exists(encoder_dir):
-      raise Exception('Encoder weights could not be found in {}'.format(encoder_dir))
-
     import re
     print(" [*] Reading checkpoints...")
     checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir)
 
-    ckpt_encoder = tf.train.get_checkpoint_state(encoder_dir)
-    if ckpt_encoder.model_checkpoint_path:
-      ckpt_encoder_name = os.path.basename(ckpt_encoder.model_checkpoint_path)
-      self.encoder_loader.restore(self.sess, os.path.join(encoder_dir, ckpt_encoder_name))
-      print(" [*] Loaded encoder weights from {}".format(ckpt_encoder_name))
-    else:
-      raise Exception('Could not load encoder weights')
+    if self.use_encoder:
+      encoder_dir = os.path.join(encoder_dir, self.encoder_model_dir)
+      if not os.path.exists(encoder_dir):
+        raise Exception('Encoder weights could not be found in {}'.format(encoder_dir))
+
+      ckpt_encoder = tf.train.get_checkpoint_state(encoder_dir)
+      if ckpt_encoder.model_checkpoint_path:
+        ckpt_encoder_name = os.path.basename(ckpt_encoder.model_checkpoint_path)
+        self.encoder_loader.restore(self.sess, os.path.join(encoder_dir, ckpt_encoder_name))
+        print(" [*] Loaded encoder weights from {}".format(ckpt_encoder_name))
+      else:
+        raise Exception('Could not load encoder weights')
 
     ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
     if ckpt and ckpt.model_checkpoint_path:
