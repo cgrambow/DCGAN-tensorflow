@@ -330,6 +330,8 @@ class DCGAN(object):
         if np.mod(counter, 500) == 2:
           self.save(config.checkpoint_dir, counter)
 
+    self.save(config.checkpoint_dir, counter)
+
   def discriminator(self, image, z_, y=None, reuse=False):
     # z_ is encoder output
     with tf.variable_scope("discriminator") as scope:
