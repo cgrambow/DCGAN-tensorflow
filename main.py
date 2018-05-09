@@ -18,6 +18,7 @@ flags.DEFINE_integer("input_width", None, "The size of image to use (will be cen
 flags.DEFINE_integer("output_height", 64, "The size of the output images to produce [64]")
 flags.DEFINE_integer("output_width", None, "The size of the output images to produce. If None, same value as output_height [None]")
 flags.DEFINE_integer("discriminator_dim", 64, "The dimension of the discriminator [64]")
+flags.DEFINE_integer("z_dim", 100, "Latent space dimension [100]")
 flags.DEFINE_integer("ez_dim", 100, "The dimension of the latent space dimension of the encoder [100]")
 flags.DEFINE_string("dataset", "celebA", "The name of dataset [celebA, mnist, lsun]")
 flags.DEFINE_string("input_fname_pattern", "*.jpg", "Glob pattern of filename of input images [*]")
@@ -28,7 +29,6 @@ flags.DEFINE_string("sample_dir", "samples", "Directory name to save the image s
 flags.DEFINE_boolean("train", False, "True for training, False for testing [False]")
 flags.DEFINE_boolean("crop", False, "True for training, False for testing [False]")
 flags.DEFINE_boolean("visualize", False, "True for visualizing, False for nothing [False]")
-flags.DEFINE_integer("generate_test_images", 100, "Number of images to generate during test. [100]")
 flags.DEFINE_integer("test", 0, "Generate and save number of images given by 'test'. [0]")
 flags.DEFINE_boolean("use_encoder", False, "True to use static encoder. [False]")
 flags.DEFINE_boolean("use_trainable_encoder", False, "True to use trainable encoder. [False]")
@@ -62,7 +62,7 @@ def main(_):
           batch_size=FLAGS.batch_size,
           sample_num=FLAGS.batch_size,
           y_dim=10,
-          z_dim=FLAGS.generate_test_images,
+          z_dim=FLAGS.z_dim,
           dataset_name=FLAGS.dataset,
           input_fname_pattern=FLAGS.input_fname_pattern,
           crop=FLAGS.crop,
@@ -79,7 +79,7 @@ def main(_):
           output_height=FLAGS.output_height,
           batch_size=FLAGS.batch_size,
           sample_num=FLAGS.batch_size,
-          z_dim=FLAGS.generate_test_images,
+          z_dim=FLAGS.z_dim,
           ez_dim=FLAGS.ez_dim,
           dataset_name=FLAGS.dataset,
           input_fname_pattern=FLAGS.input_fname_pattern,
