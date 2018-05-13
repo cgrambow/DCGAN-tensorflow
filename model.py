@@ -182,7 +182,8 @@ class DCGAN(object):
     self.d_loss_sum = scalar_summary("d_loss", self.d_loss)
 
     t_vars = tf.trainable_variables()
-    stat_vars = [var for var in tf.global_variables() if 'moving' in var.name]
+    # Have to change this if wanting to use trainable encoder:
+    stat_vars = [var for var in tf.global_variables() if ('moving' in var.name and 'encoder' not in var.name)]
 
     self.d_vars = [var for var in t_vars if 'd_' in var.name]
     self.g_vars = [var for var in t_vars if 'g_' in var.name]
