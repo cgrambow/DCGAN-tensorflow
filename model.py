@@ -195,6 +195,9 @@ class DCGAN(object):
       self.e_vars = [var for var in t_vars if '/e_' in var.name]  # These won't actually be trained
       self.encoder_loader = tf.train.Saver(self.e_vars)
 
+    moving_avg_vars = [var for var in tf.global_variables() if 'moving' in var.name]
+    self.moving_avg_saver = tf.train.Saver(moving_avg_vars)
+
   def train(self, config):
     d_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
               .minimize(self.d_loss, var_list=self.d_vars)
@@ -676,6 +679,22 @@ class DCGAN(object):
       ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
       self.saver.restore(self.sess, os.path.join(checkpoint_dir, ckpt_name))
       counter = int(next(re.finditer("(\d+)(?!.*\d)",ckpt_name)).group(0))
+      print(" [*] Success to read {}".format(ckpt_name))
+      return True, counter
+    else:
+      print(" [*] Failed to find a checkpoint")
+      return False, 0
+
+  def load_moving_avg(self, checkpoint_dir):
+    import re
+    print(" [*] Reading moving average checkpoints...")
+    checkpoint_dir = os.path.join(checkpoint_dir, self.model_dir)
+
+    ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
+    if ckpt and ckpt.model_checkpoint_path:
+      ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+      self.moving_avg_saver.restore(self.sess, os.path.join(checkpoint_dir, ckpt_name))
+      counter = int(next(re.finditer("(\d+)(?!.*\d)", ckpt_name)).group(0))
       print(" [*] Success to read {}".format(ckpt_name))
       return True, counter
     else:
