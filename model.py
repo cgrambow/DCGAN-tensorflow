@@ -182,18 +182,25 @@ class DCGAN(object):
     self.d_loss_sum = scalar_summary("d_loss", self.d_loss)
 
     t_vars = tf.trainable_variables()
+    stat_vars = [var for var in tf.global_variables() if 'moving' in var.name]
 
     self.d_vars = [var for var in t_vars if 'd_' in var.name]
     self.g_vars = [var for var in t_vars if 'g_' in var.name]
+    self.d_stat_vars = [var for var in stat_vars if 'd_' in var.name]
+    self.g_stat_vars = [var for var in stat_vars if 'g_' in var.name]
+
     if self.use_trainable_encoder:
       self.et_vars = [var for var in t_vars if 'et_' in var.name]
-      self.saver = tf.train.Saver(self.d_vars+self.g_vars+self.et_vars)
+      self.et_stat_vars = [var for var in stat_vars if 'et_' in var.name]
+      self.saver = tf.train.Saver(self.d_vars+self.g_vars+self.et_vars+
+                                  self.d_stat_vars+self.g_stat_vars+self.et_stat_vars)
     else:
-      self.saver = tf.train.Saver(self.d_vars+self.g_vars)
+      self.saver = tf.train.Saver(self.d_vars+self.g_vars+self.d_stat_vars+self.g_stat_vars)
 
     if self.use_encoder:
       self.e_vars = [var for var in t_vars if '/e_' in var.name]  # These won't actually be trained
-      self.encoder_loader = tf.train.Saver(self.e_vars)
+      self.e_stat_vars = [var for var in stat_vars if '/e_' in var.name]
+      self.encoder_loader = tf.train.Saver(self.e_vars+self.e_stat_vars)
 
   def train(self, config):
     d_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
