@@ -32,6 +32,7 @@ flags.DEFINE_boolean("visualize", False, "True for visualizing, False for nothin
 flags.DEFINE_integer("test", 0, "Generate and save number of images given by 'test'. [0]")
 flags.DEFINE_boolean("use_encoder", False, "True to use static encoder. [False]")
 flags.DEFINE_boolean("use_trainable_encoder", False, "True to use trainable encoder. [False]")
+flags.DEFINE_boolean("set_stats", False, "True to set batch norm statistics without training weights. [False]")
 FLAGS = flags.FLAGS
 
 def main(_):
@@ -94,7 +95,9 @@ def main(_):
 
     show_all_variables()
 
-    if FLAGS.train:
+    if FLAGS.set_stats:
+      dcgan.set_stats(FLAGS)
+    elif FLAGS.train:
       dcgan.train(FLAGS)
     else:
       if not dcgan.load(FLAGS.checkpoint_dir, FLAGS.encoder_dir)[0]:
