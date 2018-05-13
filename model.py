@@ -195,10 +195,12 @@ class DCGAN(object):
       self.e_vars = [var for var in t_vars if '/e_' in var.name]  # These won't actually be trained
       self.encoder_loader = tf.train.Saver(self.e_vars)
 
-    moving_avg_vars = [var for var in tf.global_variables() if 'moving' in var.name]
+    moving_avg_vars = [var for var in tf.global_variables() if ('moving' in var.name and 'encoder' not in var.name)]
     self.moving_avg_saver = tf.train.Saver(moving_avg_vars)
 
   def save_fixed_model(self, checkpoint_dir0, checkpoint_dir, encoder_dir):
+    tf.global_variables_initializer().run()
+    
     could_load0, _ = self.load_moving_avg(checkpoint_dir0)
     could_load, counter = self.load(checkpoint_dir, encoder_dir)
     if not could_load or not could_load0:
