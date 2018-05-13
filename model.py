@@ -198,6 +198,30 @@ class DCGAN(object):
     moving_avg_vars = [var for var in tf.global_variables() if 'moving' in var.name]
     self.moving_avg_saver = tf.train.Saver(moving_avg_vars)
 
+  def save_fixed_model(self, checkpoint_dir0, checkpoint_dir, encoder_dir):
+    could_load0, _ = self.load_moving_avg(checkpoint_dir0)
+    could_load, counter = self.load(checkpoint_dir, encoder_dir)
+    if not could_load or not could_load0:
+      raise Exception("[!] Need trained model")
+
+    t_vars = tf.trainable_variables()
+    stat_vars = [var for var in tf.global_variables() if 'moving' in var.name]
+
+    self.d_vars = [var for var in t_vars if 'd_' in var.name]
+    self.g_vars = [var for var in t_vars if 'g_' in var.name]
+    self.d_stat_vars = [var for var in stat_vars if 'd_' in var.name]
+    self.g_stat_vars = [var for var in stat_vars if 'g_' in var.name]
+
+    if self.use_trainable_encoder:
+      self.et_vars = [var for var in t_vars if 'et_' in var.name]
+      self.et_stat_vars = [var for var in stat_vars if 'et_' in var.name]
+      self.saver = tf.train.Saver(self.d_vars+self.g_vars+self.et_vars+
+                                  self.d_stat_vars+self.g_stat_vars+self.et_stat_vars)
+    else:
+      self.saver = tf.train.Saver(self.d_vars+self.g_vars+self.d_stat_vars+self.g_stat_vars)
+
+    self.save(checkpoint_dir, counter)
+
   def train(self, config):
     d_optim = tf.train.AdamOptimizer(config.learning_rate, beta1=config.beta1) \
               .minimize(self.d_loss, var_list=self.d_vars)

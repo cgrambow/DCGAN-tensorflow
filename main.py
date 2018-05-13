@@ -33,6 +33,7 @@ flags.DEFINE_boolean("visualize", False, "True for visualizing, False for nothin
 flags.DEFINE_integer("test", 0, "Generate and save number of images given by 'test'. [0]")
 flags.DEFINE_boolean("use_encoder", False, "True to use static encoder. [False]")
 flags.DEFINE_boolean("use_trainable_encoder", False, "True to use trainable encoder. [False]")
+flags.DEFINE_boolean("fix", False, "True to fix model. [False]")
 FLAGS = flags.FLAGS
 
 def main(_):
@@ -97,9 +98,9 @@ def main(_):
 
     if FLAGS.train:
       dcgan.train(FLAGS)
+    elif FLAGS.fix:
+      dcgan.save_fixed_model(FLAGS.checkpoint_dir0, FLAGS.checkpoint_dir, FLAGS.encoder_dir)
     else:
-      if not dcgan.load_moving_avg(FLAGS.checkpoint_dir0)[0]:
-        raise Exception("[!] Train a model first, then run test mode")
       if not dcgan.load(FLAGS.checkpoint_dir, FLAGS.encoder_dir)[0]:
         raise Exception("[!] Train a model first, then run test mode")
       
